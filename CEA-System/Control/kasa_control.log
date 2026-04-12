@@ -1,0 +1,44 @@
+nohup: ignoring input
+Connecting to Kasa plug...
+Traceback (most recent call last):
+  File "/home/jackyuanrongxu/CEA-System/CEA-System/Control/kasa_control.py", line 84, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "/usr/lib/python3.13/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/home/jackyuanrongxu/CEA-System/CEA-System/Control/kasa_control.py", line 43, in main
+    await plug.update()
+  File "/home/jackyuanrongxu/.local/lib/python3.13/site-packages/kasa/iot/iotdevice.py", line 315, in update
+    response = await self.protocol.query(req)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jackyuanrongxu/.local/lib/python3.13/site-packages/kasa/protocols/iotprotocol.py", line 83, in query
+    return await self._query(request, retry_count)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jackyuanrongxu/.local/lib/python3.13/site-packages/kasa/protocols/iotprotocol.py", line 99, in _query
+    raise auex
+  File "/home/jackyuanrongxu/.local/lib/python3.13/site-packages/kasa/protocols/iotprotocol.py", line 88, in _query
+    return await self._execute_query(request, retry)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jackyuanrongxu/.local/lib/python3.13/site-packages/kasa/protocols/iotprotocol.py", line 148, in _execute_query
+    resp = await self._transport.send(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jackyuanrongxu/.local/lib/python3.13/site-packages/kasa/transports/klaptransport.py", line 354, in send
+    await self.perform_handshake()
+  File "/home/jackyuanrongxu/.local/lib/python3.13/site-packages/kasa/transports/klaptransport.py", line 322, in perform_handshake
+    local_seed, remote_seed, auth_hash = await self.perform_handshake1()
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jackyuanrongxu/.local/lib/python3.13/site-packages/kasa/transports/klaptransport.py", line 273, in perform_handshake1
+    raise AuthenticationError(msg)
+kasa.exceptions.AuthenticationError: Device response did not match our challenge on ip 192.168.1.64, check that your e-mail and password (both case-sensitive) are correct. 
+Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7f8c7dd2b0>
+Unclosed connector
+connections: ['deque([(<aiohttp.client_proto.ResponseHandler object at 0x7f8c96f410>, 3221.881489803)])']
+connector: <aiohttp.connector.TCPConnector object at 0x7f8c7dd160>

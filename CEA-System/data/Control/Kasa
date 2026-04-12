@@ -1,0 +1,23 @@
+import asyncio
+from kasa import Discover
+
+async def main():
+    devices = await Discover.discover()
+
+    if not devices:
+        print("No Kasa devices found.")
+        return
+
+    for ip, device in devices.items():
+        await device.update()
+        print(f"{ip} -> {device.alias} | On: {device.is_on}")
+
+    # Pick the first discovered device
+    plug = list(devices.values())[0]
+
+    await plug.turn_on()
+    await plug.update()
+    print(f"Turned on: {plug.alias} | On: {plug.is_on}")
+
+if __name__ == "__main__":
+    asyncio.run(main()) 
