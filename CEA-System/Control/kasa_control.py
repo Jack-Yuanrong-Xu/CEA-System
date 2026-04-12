@@ -13,8 +13,8 @@ INFLUX_BUCKET = "cea_sensors"
 PLUG_IP = "192.168.1.64"  
 
 # ── Temperature thresholds (°C) ───────────────────────────────────
-TEMP_HIGH = 37.8   # turn OFF above this
-TEMP_LOW  = 36.9   # turn ON below this
+TEMP_HIGH = 37.7   # turn OFF above this
+TEMP_LOW  = 37.4   # turn ON below this
 
 # ── Loop interval ─────────────────────────────────────────────────
 CHECK_INTERVAL_SECONDS = 30
