@@ -38,7 +38,7 @@ Traceback (most recent call last):
     raise AuthenticationError(msg)
 kasa.exceptions.AuthenticationError: Device response did not match our challenge on ip 192.168.1.64, check that your e-mail and password (both case-sensitive) are correct. 
 Unclosed client session
-client_session: <aiohttp.client.ClientSession object at 0x7f8c7dd2b0>
+client_session: <aiohttp.client.ClientSession object at 0x7f8de0d2b0>
 Unclosed connector
-connections: ['deque([(<aiohttp.client_proto.ResponseHandler object at 0x7f8c96f410>, 3221.881489803)])']
-connector: <aiohttp.connector.TCPConnector object at 0x7f8c7dd160>
+connections: ['deque([(<aiohttp.client_proto.ResponseHandler object at 0x7f8df9f230>, 5221.850932651)])']
+connector: <aiohttp.connector.TCPConnector object at 0x7f8de0d160>
