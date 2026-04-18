@@ -1,27 +1,25 @@
 import os
+import time
 import asyncio
 from kasa import Discover
 from influxdb_client import InfluxDBClient
 
-# ── InfluxDB config ───────────────────────────────────────────────
-INFLUX_URL    = "http://localhost:8086"
-INFLUX_TOKEN  = os.environ["INFLUX_TOKEN"]
-INFLUX_ORG    = "CEA-System"
+INFLUX_URL = "http://localhost:8086"
+INFLUX_TOKEN = os.environ["INFLUX_TOKEN"]
+INFLUX_ORG = "CEA-System"
 INFLUX_BUCKET = "cea_sensors"
 
-# ── Kasa plug config ──────────────────────────────────────────────
-PLUG_IP = "192.168.1.64"  
+PLUG_IP = "192.168.1.64"
 
-# ── Temperature thresholds (°C) ───────────────────────────────────
-TEMP_HIGH = 37.7   # turn OFF above this
-TEMP_LOW  = 37.4   # turn ON below this
+TEMP_HIGH = 37.68
+TEMP_LOW = 37.56
+TEMP_EMERGENCY_HIGH = 38.00
 
-# ── Loop interval ─────────────────────────────────────────────────
 CHECK_INTERVAL_SECONDS = 30
+KASA_TIMEOUT = 5
 
 
 def get_latest_temperature():
-    """Query the most recent scd30_temperature_c value from InfluxDB."""
     query = f'''
     from(bucket: "{INFLUX_BUCKET}")
       |> range(start: -2m)
@@ -29,53 +27,89 @@ def get_latest_temperature():
       |> filter(fn: (r) => r._field == "scd30_temperature_c")
       |> last()
     '''
-    with InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG, timeout=30_000) as client:
+
+    with InfluxDBClient(
+        url=INFLUX_URL,
+        token=INFLUX_TOKEN,
+        org=INFLUX_ORG,
+        timeout=5000,
+    ) as client:
         tables = client.query_api().query(query)
         for table in tables:
             for record in table.records:
                 return record.get_value()
-    return None  # no data found
+    return None
+
+
+async def kasa_update(plug):
+    await asyncio.wait_for(plug.update(), timeout=KASA_TIMEOUT)
+
+
+async def kasa_turn_on(plug):
+    await asyncio.wait_for(plug.turn_on(), timeout=KASA_TIMEOUT)
+
+
+async def kasa_turn_off(plug):
+    await asyncio.wait_for(plug.turn_off(), timeout=KASA_TIMEOUT)
+
+
+def decide_heater_state(temp, current_on):
+    if temp is None:
+        return current_on, "no_temp"
+
+    # Emergency cutoff
+    if temp >= TEMP_EMERGENCY_HIGH:
+        return False, "emergency_off"
+
+    # Normal hysteresis
+    if temp > TEMP_HIGH:
+        return False, "high_off"
+
+    if temp < TEMP_LOW:
+        return True, "low_on"
+
+    return current_on, "hold"
 
 
 async def main():
     print("Connecting to Kasa plug...")
-    plug = await Discover.discover_single(PLUG_IP)
-    await plug.update()
+    plug = await asyncio.wait_for(
+        Discover.discover_single(PLUG_IP),
+        timeout=KASA_TIMEOUT
+    )
+    await kasa_update(plug)
     print(f"Connected: {plug.alias} | Currently on: {plug.is_on}")
 
-
-    print(f"Starting control loop — checking every {CHECK_INTERVAL_SECONDS}s")
-    print(f"Thresholds: turn OFF above {TEMP_HIGH}°C, turn ON below {TEMP_LOW}°C\n")
-
-
     while True:
-        temperature = get_latest_temperature()
-        await plug.update()
-        current_state = plug.is_on
+        try:
+            temp = get_latest_temperature()
+            await kasa_update(plug)
 
-        if temperature is None:
-            print("⚠ No temperature data found — skipping")
+            current_on = plug.is_on
+            desired_on, reason = decide_heater_state(temp, current_on)
 
-        elif temperature > TEMP_HIGH:
-            if current_state:
-                await plug.turn_off()
-                await plug.update()
-                print(f"🌡 {temperature:.1f}°C > {TEMP_HIGH}°C → Plug OFF ({plug.alias})")
+            if temp is None:
+                print("No temperature data found")
+
+            elif desired_on != current_on:
+                if desired_on:
+                    await kasa_turn_on(plug)
+                    print(f"{temp:.2f}°C -> Plug ON ({reason})")
+                else:
+                    await kasa_turn_off(plug)
+                    print(f"{temp:.2f}°C -> Plug OFF ({reason})")
+
             else:
-                print(f"🌡 {temperature:.1f}°C > {TEMP_HIGH}°C → Already OFF, no action")
+                print(f"{temp:.2f}°C -> No change ({reason})")
 
-        elif temperature < TEMP_LOW:
-            if not current_state:
-                await plug.turn_on()
-                await plug.update()
-                print(f"🌡 {temperature:.1f}°C < {TEMP_LOW}°C → Plug ON ({plug.alias})")
-            else:
-                print(f"🌡 {temperature:.1f}°C < {TEMP_LOW}°C → Already ON, no action")
-
-        else:
-            print(f"🌡 {temperature:.1f}°C — within range, no change")
+        except asyncio.TimeoutError:
+            print("Timeout talking to plug")
+        except Exception as e:
+            print(f"Error: {e}")
 
         await asyncio.sleep(CHECK_INTERVAL_SECONDS)
 
+
 if __name__ == "__main__":
     asyncio.run(main())
+
