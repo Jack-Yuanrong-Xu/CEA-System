@@ -1,6 +1,9 @@
 import os
+import sys
 import time
 import asyncio
+from datetime import datetime, timezone
+
 from kasa import Discover
 from influxdb_client import InfluxDBClient
 
@@ -18,27 +21,25 @@ TEMP_EMERGENCY_HIGH = 38.00
 CHECK_INTERVAL_SECONDS = 30
 KASA_TIMEOUT = 5
 
+MAX_TEMP_AGE_SECONDS = 60
+MAX_CONSECUTIVE_FAILURES = 3
 
-def get_latest_temperature():
+
+def get_latest_temperature(query_api):
     query = f'''
     from(bucket: "{INFLUX_BUCKET}")
-      |> range(start: -2m)
+      |> range(start: -5m)
       |> filter(fn: (r) => r._measurement == "environment")
       |> filter(fn: (r) => r._field == "scd30_temperature_c")
       |> last()
     '''
 
-    with InfluxDBClient(
-        url=INFLUX_URL,
-        token=INFLUX_TOKEN,
-        org=INFLUX_ORG,
-        timeout=5000,
-    ) as client:
-        tables = client.query_api().query(query)
-        for table in tables:
-            for record in table.records:
-                return record.get_value()
-    return None
+    tables = query_api.query(query)
+    for table in tables:
+        for record in table.records:
+            return record.get_value(), record.get_time()
+
+    return None, None
 
 
 async def kasa_update(plug):
@@ -55,13 +56,11 @@ async def kasa_turn_off(plug):
 
 def decide_heater_state(temp, current_on):
     if temp is None:
-        return current_on, "no_temp"
+        return False, "no_temp_fail_safe_off"
 
-    # Emergency cutoff
     if temp >= TEMP_EMERGENCY_HIGH:
         return False, "emergency_off"
 
-    # Normal hysteresis
     if temp > TEMP_HIGH:
         return False, "high_off"
 
@@ -71,7 +70,32 @@ def decide_heater_state(temp, current_on):
     return current_on, "hold"
 
 
+async def force_off_and_exit(plug, reason):
+    print(f"[FATAL] {reason}")
+
+    try:
+        await kasa_update(plug)
+        if plug.is_on:
+            await kasa_turn_off(plug)
+            print("[SAFE] Plug forced OFF before shutdown.")
+        else:
+            print("[SAFE] Plug already OFF.")
+    except Exception as exc:
+        print(f"[WARN] Could not confirm/force plug OFF: {exc}")
+
+    raise SystemExit(1)
+
+
 async def main():
+    print("Creating InfluxDB client...")
+    client = InfluxDBClient(
+        url=INFLUX_URL,
+        token=INFLUX_TOKEN,
+        org=INFLUX_ORG,
+        timeout=5000,
+    )
+    query_api = client.query_api()
+
     print("Connecting to Kasa plug...")
     plug = await asyncio.wait_for(
         Discover.discover_single(PLUG_IP),
@@ -80,36 +104,67 @@ async def main():
     await kasa_update(plug)
     print(f"Connected: {plug.alias} | Currently on: {plug.is_on}")
 
-    while True:
-        try:
-            temp = get_latest_temperature()
-            await kasa_update(plug)
+    consecutive_failures = 0
 
-            current_on = plug.is_on
-            desired_on, reason = decide_heater_state(temp, current_on)
+    try:
+        while True:
+            try:
+                temp, temp_time = get_latest_temperature(query_api)
+                await kasa_update(plug)
 
-            if temp is None:
-                print("No temperature data found")
+                current_on = plug.is_on
 
-            elif desired_on != current_on:
-                if desired_on:
-                    await kasa_turn_on(plug)
-                    print(f"{temp:.2f}°C -> Plug ON ({reason})")
+                if temp is None or temp_time is None:
+                    desired_on, reason = False, "no_temp_fail_safe_off"
                 else:
-                    await kasa_turn_off(plug)
-                    print(f"{temp:.2f}°C -> Plug OFF ({reason})")
+                    age_seconds = (datetime.now(timezone.utc) - temp_time).total_seconds()
 
-            else:
-                print(f"{temp:.2f}°C -> No change ({reason})")
+                    if age_seconds > MAX_TEMP_AGE_SECONDS:
+                        desired_on, reason = False, f"stale_temp_fail_safe_off ({int(age_seconds)}s old)"
+                        temp = None
+                    else:
+                        desired_on, reason = decide_heater_state(temp, current_on)
 
-        except asyncio.TimeoutError:
-            print("Timeout talking to plug")
-        except Exception as e:
-            print(f"Error: {e}")
+                if desired_on != current_on:
+                    if desired_on:
+                        await kasa_turn_on(plug)
+                        if temp is not None:
+                            print(f"{temp:.2f}°C -> Plug ON ({reason})")
+                        else:
+                            print(f"Temp unavailable -> Plug ON ({reason})")
+                    else:
+                        await kasa_turn_off(plug)
+                        if temp is not None:
+                            print(f"{temp:.2f}°C -> Plug OFF ({reason})")
+                        else:
+                            print(f"Temp unavailable -> Plug OFF ({reason})")
+                else:
+                    if temp is not None:
+                        print(f"{temp:.2f}°C -> No change ({reason})")
+                    else:
+                        print(f"Temp unavailable -> No change ({reason})")
 
-        await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+                consecutive_failures = 0
+
+            except asyncio.TimeoutError:
+                consecutive_failures += 1
+                print(f"[WARN] Timeout talking to plug ({consecutive_failures}/{MAX_CONSECUTIVE_FAILURES})")
+
+            except Exception as e:
+                consecutive_failures += 1
+                print(f"[WARN] Error ({consecutive_failures}/{MAX_CONSECUTIVE_FAILURES}): {e}")
+
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                await force_off_and_exit(
+                    plug,
+                    f"Too many consecutive failures ({consecutive_failures}). Exiting for clean restart."
+                )
+
+            await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
