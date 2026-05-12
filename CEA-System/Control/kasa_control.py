@@ -14,9 +14,9 @@ INFLUX_BUCKET = "cea_sensors"
 
 PLUG_IP = "192.168.1.64"
 
-TEMP_HIGH = 37.68
-TEMP_LOW = 37.56
-TEMP_EMERGENCY_HIGH = 38.00
+TEMP_HIGH = 37.62
+TEMP_LOW = 37.50
+TEMP_EMERGENCY_HIGH = 37.75
 
 CHECK_INTERVAL_SECONDS = 30
 KASA_TIMEOUT = 5
@@ -30,7 +30,7 @@ def get_latest_temperature(query_api):
     from(bucket: "{INFLUX_BUCKET}")
       |> range(start: -5m)
       |> filter(fn: (r) => r._measurement == "environment")
-      |> filter(fn: (r) => r._field == "scd30_temperature_c")
+      |> filter(fn: (r) => r._field == "temperature_c")
       |> last()
     '''
 
